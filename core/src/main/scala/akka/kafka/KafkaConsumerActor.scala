@@ -95,12 +95,19 @@ private[kafka] class KafkaConsumerActor[K, V](settings: ConsumerSettings[K, V])
       val commitMap = offsets.mapValues(new OffsetAndMetadata(_))
       val reply = sender()
       commitsInProgress += 1
+      log.warning("Incremented commitsInProgress to {}", commitsInProgress)
       consumer.commitAsync(commitMap.asJava, new OffsetCommitCallback {
         override def onComplete(offsets: util.Map[TopicPartition, OffsetAndMetadata], exception: Exception): Unit = {
           // this is invoked on the thread calling consumer.poll which will always be the actor, so it is safe
           commitsInProgress -= 1
-          if (exception != null) reply ! Status.Failure(exception)
-          else reply ! Committed(offsets.asScala.toMap)
+          log.warning("Decremented commitsInProgress to {}", commitsInProgress)
+          if (exception != null) {
+            log.error(exception, "exception in callback")
+            reply ! Status.Failure(exception)
+          } else {
+            log.warning(s"Committed offsets: {}", offsets.asScala.map { case (p, o) => s"${p.partition()} - ${o.offset()}" }.mkString(", "))
+            reply ! Committed(offsets.asScala.toMap)
+          }
         }
       })
       //right now we can not store commits in consumer - https://issues.apache.org/jira/browse/KAFKA-3412
